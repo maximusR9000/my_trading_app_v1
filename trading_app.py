@@ -1,5 +1,5 @@
 import streamlit as st
-from dhanhq import dhanhq
+from dhanhq import dhanhq, DhanContext
 import pandas as pd
 import requests
 import io
@@ -13,7 +13,8 @@ import time
 CLIENT_ID = st.secrets["DHAN_CLIENT_ID"]
 ACCESS_TOKEN = st.secrets["DHAN_ACCESS_TOKEN"]
 # Connect to Dhan
-dhan = dhanhq(CLIENT_ID, ACCESS_TOKEN)
+dhan_context = DhanContext(CLIENT_ID, ACCESS_TOKEN)
+dhan = dhanhq(dhan_context)
 
 # ==========================================
 # 2. DATA DOWNLOAD (RUNS ONLY ONCE)
