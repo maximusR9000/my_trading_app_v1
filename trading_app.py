@@ -8,6 +8,10 @@ st.set_page_config(
     layout="centered"
 )
 from dhanhq import dhanhq
+dhan = dhanhq(
+    st.secrets["DHAN_CLIENT_ID"],
+    st.secrets["DHAN_ACCESS_TOKEN"]
+)
 
 def get_index_price(index_name):
     try:
