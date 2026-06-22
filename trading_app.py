@@ -36,11 +36,11 @@ with col1:
         # Placing order with Dhan
         response = dhan.place_order(
             security_id=security_id,
-            exchange_segment=dhan.NSE_EQ,     # Equity Cash Segment
+            exchange_segment=dhan.NSE,        # Fixed: Using dhan.NSE
             transaction_type=dhan.BUY,
             quantity=qty,
             order_type=dhan.MARKET,
-            product_type=dhan.CNC,            # CNC = Cash & Carry (Standard Delivery)
+            product_type=dhan.CNC,            # CNC = Cash & Carry (Delivery)
             price=0
         )
         
@@ -54,11 +54,11 @@ with col2:
         # Placing order with Dhan
         response = dhan.place_order(
             security_id=security_id,
-            exchange_segment=dhan.NSE_EQ,     # Equity Cash Segment
+            exchange_segment=dhan.NSE,        # Fixed: Using dhan.NSE
             transaction_type=dhan.SELL,
             quantity=qty,
             order_type=dhan.MARKET,
-            product_type=dhan.CNC,            # CNC = Cash & Carry (Standard Delivery)
+            product_type=dhan.CNC,            # CNC = Cash & Carry (Delivery)
             price=0
         )
         
