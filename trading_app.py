@@ -1,5 +1,6 @@
 import streamlit as st
 from dhanhq import dhanhq, DhanContext
+import datetime
 
 # --- 1. SETUP ---
 CLIENT_ID = st.secrets["DHAN_CLIENT_ID"]
@@ -8,23 +9,16 @@ dhan_context = DhanContext(CLIENT_ID, ACCESS_TOKEN)
 dhan = dhanhq(dhan_context)
 
 # --- 2. LIVE DHAN API FETCH ---
-def get_live_option_data(index_name, strike_offset, option_type):
+def get_live_option_data(index_name, expiry_date, strike_offset, option_type):
     # Dhan uses ID 13 for Nifty 50 and 51 for Sensex
     underlying_id = 13 if index_name == "Nifty 50" else 51 
     segment = "IDX_I"
     
-    # Get the nearest expiry date
-    expiry_response = dhan.expiry_list(under_security_id=underlying_id, under_exchange_segment=segment)
-    if 'data' not in expiry_response or not expiry_response['data']:
-        st.error(f"Failed to fetch expiry dates for {index_name}.")
-        return None, None, None
-        
-    nearest_expiry = expiry_response['data'][0] 
+    # Bypass the broken expiry_list() and directly ask for the option chain using your date
+    oc_response = dhan.option_chain(under_security_id=underlying_id, under_exchange_segment=segment, expiry=expiry_date)
     
-    # Get the live option chain
-    oc_response = dhan.option_chain(under_security_id=underlying_id, under_exchange_segment=segment, expiry=nearest_expiry)
-    if 'data' not in oc_response:
-        st.error("Failed to fetch the live Option Chain from Dhan.")
+    if 'data' not in oc_response or not oc_response['data']:
+        st.error(f"Dhan failed to send Option Chain data for {index_name} on {expiry_date}. Make sure the date is correct.")
         return None, None, None
         
     # Get the real-time spot price
@@ -49,11 +43,16 @@ def get_live_option_data(index_name, strike_offset, option_type):
 # --- 3. UI & LOGIC ---
 st.title("1-Click Options Trader")
 
-col_a, col_b = st.columns(2)
+# Set today's date as the default in the text box
+default_date = datetime.date.today().strftime("%Y-%m-%d")
+
+col_a, col_b, col_c = st.columns(3)
 with col_a:
     index_choice = st.selectbox("Choose Index", ["Nifty 50", "Sensex"])
 with col_b:
-    num_lots = st.selectbox("Select Number of Lots", [1, 2, 3, 4, 5])
+    num_lots = st.selectbox("Select Lots", [1, 2, 3, 4, 5])
+with col_c:
+    selected_expiry = st.text_input("Expiry Date (YYYY-MM-DD)", value=default_date)
 
 # Current 2026 Exchange Lot Sizes
 base_lot_size = 65 if index_choice == "Nifty 50" else 20
@@ -68,8 +67,8 @@ with col1:
     if st.button("BUY (Bull Put Spread)", type="primary"):
         otm_offset = -200 if index_choice == "Nifty 50" else -400
         
-        otm_id, otm_strike, live_spot = get_live_option_data(index_choice, otm_offset, "PE")
-        atm_id, atm_strike, _ = get_live_option_data(index_choice, 0, "PE")
+        otm_id, otm_strike, live_spot = get_live_option_data(index_choice, selected_expiry, otm_offset, "PE")
+        atm_id, atm_strike, _ = get_live_option_data(index_choice, selected_expiry, 0, "PE")
         
         if otm_id and atm_id:
             st.info(f"Live Spot Price: {live_spot}")
@@ -94,8 +93,8 @@ with col2:
     if st.button("SELL (Bear Call Spread)", type="primary"):
         otm_offset = 200 if index_choice == "Nifty 50" else 400
         
-        otm_id, otm_strike, live_spot = get_live_option_data(index_choice, otm_offset, "CE")
-        atm_id, atm_strike, _ = get_live_option_data(index_choice, 0, "CE")
+        otm_id, otm_strike, live_spot = get_live_option_data(index_choice, selected_expiry, otm_offset, "CE")
+        atm_id, atm_strike, _ = get_live_option_data(index_choice, selected_expiry, 0, "CE")
         
         if otm_id and atm_id:
             st.info(f"Live Spot Price: {live_spot}")
