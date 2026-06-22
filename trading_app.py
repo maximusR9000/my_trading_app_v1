@@ -7,7 +7,7 @@ st.set_page_config(
     page_icon="📈",
     layout="centered"
 )
-from dhan_client import dhan
+from dhanhq import dhanhq
 
 def get_index_price(index_name):
     try:
