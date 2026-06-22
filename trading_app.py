@@ -1,5 +1,5 @@
 # app.py
-pip install dhanhq
+# pip install dhanhq
 import streamlit as st
 
 st.set_page_config(
