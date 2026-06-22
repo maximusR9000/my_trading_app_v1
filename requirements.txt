@@ -1,4 +1,0 @@
-streamlit
-dhanhq
-pandas
-requests
