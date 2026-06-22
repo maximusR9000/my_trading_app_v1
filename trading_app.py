@@ -1,5 +1,5 @@
 # app.py
-
+!pip install dhanhq
 import streamlit as st
 
 st.set_page_config(
@@ -7,7 +7,29 @@ st.set_page_config(
     page_icon="📈",
     layout="centered"
 )
+from dhan_client import dhan
 
+def get_index_price(index_name):
+    try:
+        if index_name == "NIFTY":
+            security_id = "13"   # NIFTY 50 Index
+            exchange_segment = "IDX_I"
+
+        elif index_name == "SENSEX":
+            security_id = "51"   # SENSEX Index
+            exchange_segment = "IDX_I"
+
+        response = dhan.quote_data(
+            securities={
+                exchange_segment: [security_id]
+            }
+        )
+
+        return response["data"][exchange_segment][security_id]["last_price"]
+
+    except Exception as e:
+        st.error(f"Price Error: {e}")
+        return None
 # -----------------------------
 # Session State
 # -----------------------------
@@ -31,16 +53,14 @@ index = st.selectbox(
 # -----------------------------
 # Market Information
 # -----------------------------
-st.divider()
-
-st.subheader("Market Information")
+ive_price = get_index_price(index)
 
 col1, col2 = st.columns(2)
 
 with col1:
     st.metric(
         label="Live Price",
-        value="Loading..."
+        value=f"{live_price:,.2f}" if live_price else "N/A"
     )
 
 with col2:
