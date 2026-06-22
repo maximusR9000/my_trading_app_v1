@@ -8,7 +8,6 @@ dhan_context = DhanContext(CLIENT_ID, ACCESS_TOKEN)
 dhan = dhanhq(dhan_context)
 
 # --- 2. THE 5 SHARES ---
-# These are the standard NSE Security IDs for these stocks
 stock_ids = {
     "Reliance Industries": "2885",
     "HDFC Bank": "1333",
@@ -17,11 +16,10 @@ stock_ids = {
     "ICICI Bank": "4193"
 }
 
-# --- 3. USER INTERFACE ---
-st.title("API Connection Tester")
-st.write("Test your Dhan API connection with simple stock orders.")
+# --- 3. UI ---
+st.title("API Connection Tester (Failsafe Version)")
+st.write("Using a raw string workaround to avoid library errors.")
 
-# Dropdowns and inputs
 selected_stock = st.selectbox("Select a Share", list(stock_ids.keys()))
 qty = st.number_input("Enter Quantity", min_value=1, value=5)
 
@@ -33,34 +31,34 @@ with col1:
     if st.button("BUY", type="primary"):
         security_id = stock_ids[selected_stock]
         
-        # Placing order with Dhan
+        # WORKAROUND: Using pure text instead of dhan.CONSTANT
         response = dhan.place_order(
             security_id=security_id,
-            exchange_segment=dhan.NSE,        # Fixed: Using dhan.NSE
-            transaction_type=dhan.BUY,
+            exchange_segment="NSE_EQ",  
+            transaction_type="BUY",
             quantity=qty,
-            order_type=dhan.MARKET,
-            product_type=dhan.CNC,            # CNC = Cash & Carry (Delivery)
+            order_type="MARKET",
+            product_type="CNC",         
             price=0
         )
         
-        st.write("Buy Signal Sent! Here is what Dhan said:")
+        st.write("Buy Signal Sent! Raw response:")
         st.json(response)
 
 with col2:
     if st.button("SELL", type="primary"):
         security_id = stock_ids[selected_stock]
         
-        # Placing order with Dhan
+        # WORKAROUND: Using pure text instead of dhan.CONSTANT
         response = dhan.place_order(
             security_id=security_id,
-            exchange_segment=dhan.NSE,        # Fixed: Using dhan.NSE
-            transaction_type=dhan.SELL,
+            exchange_segment="NSE_EQ", 
+            transaction_type="SELL",
             quantity=qty,
-            order_type=dhan.MARKET,
-            product_type=dhan.CNC,            # CNC = Cash & Carry (Delivery)
+            order_type="MARKET",
+            product_type="CNC",         
             price=0
         )
         
-        st.write("Sell Signal Sent! Here is what Dhan said:")
+        st.write("Sell Signal Sent! Raw response:")
         st.json(response)
