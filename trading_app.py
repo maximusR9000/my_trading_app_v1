@@ -1,169 +1,149 @@
 import streamlit as st
 from dhanhq import dhanhq, DhanContext
-import pandas as pd
-import requests
-import io
-import time
 
 # ==========================================
 # 1. SETUP AND CONNECTION
 # ==========================================
 
-# Enter your Dhan API Details here
 CLIENT_ID = st.secrets["DHAN_CLIENT_ID"]
 ACCESS_TOKEN = st.secrets["DHAN_ACCESS_TOKEN"]
+
 # Connect to Dhan
 dhan_context = DhanContext(CLIENT_ID, ACCESS_TOKEN)
 dhan = dhanhq(dhan_context)
 
 # ==========================================
-# 2. DATA DOWNLOAD (RUNS ONLY ONCE)
+# 2. LIVE API FETCH FUNCTION (NO MORE CSV)
 # ==========================================
 
-@st.cache_data
-def load_scrip_master():
-    """Downloads Dhan's daily ID list so the system can find exact option codes."""
-    csv_url = "https://images.dhan.co/api-data/api-scrip-master.csv"
-    response = requests.get(csv_url)
-    df = pd.read_csv(io.StringIO(response.text))
-    return df
-
-# Load the file into memory
-scrip_df = load_scrip_master()
-
-# ==========================================
-# 3. HELPER FUNCTIONS
-# ==========================================
-
-def get_current_price(index_name):
-    """Fetches the live price. (Replace this with live API data later)."""
-    # For now, we use a placeholder price
-    if index_name == "Nifty 50":
-        return 22000
-    else:
-        return 73000
-
-def get_security_id(index_name, strike, option_type):
-    """Searches the downloaded list to find the exact computer ID for the option."""
-    symbol = "NIFTY" if index_name == "Nifty 50" else "SENSEX"
+def get_live_option_data(index_name, strike_offset, option_type):
+    """
+    Fetches the live spot price and exact Security ID straight from Dhan's Option Chain API.
+    """
+    # 13 is the Dhan system ID for NIFTY 50. 51 is commonly used for BSE SENSEX.
+    underlying_id = 13 if index_name == "Nifty 50" else 51 
+    segment = "IDX_I"
     
-    # Filter for Index Options
-    df = scrip_df[scrip_df['SEM_INSTRUMENT_NAME'] == 'OPTIDX']
-    df = df[df['SEM_CUSTOM_SYMBOL'].str.contains(symbol, na=False)]
+    # 1. Ask Dhan for the nearest expiry date
+    expiry_response = dhan.expiry_list(under_security_id=underlying_id, under_exchange_segment=segment)
     
-    # Search for exactly this symbol, strike, and type (CE/PE)
-    search_pattern = f"{symbol}.*{int(strike)}{option_type}"
-    matches = df[df['SEM_TRADING_SYMBOL'].str.contains(search_pattern, na=False, regex=True)]
+    if 'data' not in expiry_response or not expiry_response['data']:
+        st.error(f"Failed to fetch expiry dates for {index_name}.")
+        return None, None
+        
+    nearest_expiry = expiry_response['data'][0] 
     
-    if not matches.empty:
-        # Sort by date to get the closest weekly expiry
-        matches = matches.sort_values(by='SEM_EXPIRY_DATE')
-        exact_id = matches.iloc[0]['SEM_SMST_SECURITY_ID']
-        return str(exact_id)
-    else:
-        st.error(f"Could not find ID for {symbol} {strike} {option_type}")
-        return None
-
-def place_market_order(security_id, transaction_type, quantity):
-    """Sends the actual buy or sell signal to Dhan."""
-    dhan.place_order(
-        security_id=security_id,
-        exchange_segment=dhan.NSE_FNO,
-        transaction_type=transaction_type,
-        quantity=quantity,
-        order_type=dhan.MARKET,
-        product_type=dhan.MARGIN, # MARGIN means NORMAL/Carryforward order
-        price=0
-    )
+    # 2. Ask Dhan for the entire live option chain for that expiry
+    oc_response = dhan.option_chain(under_security_id=underlying_id, under_exchange_segment=segment, expiry=nearest_expiry)
+    
+    if 'data' not in oc_response:
+        st.error("Failed to fetch the Option Chain from Dhan.")
+        return None, None
+        
+    # 3. Extract the live spot price
+    live_spot = oc_response['data']['last_price']
+    
+    # 4. Calculate the target strike price
+    step = 50 if index_name == "Nifty 50" else 100
+    atm_strike = round(live_spot / step) * step
+    target_strike = atm_strike + strike_offset
+    
+    # Dhan's option chain dictionary formats strikes like '22000.000000'
+    strike_key = f"{float(target_strike):.6f}"
+    
+    # 5. Extract the exact Security ID
+    try:
+        opt_key = option_type.lower() # 'ce' or 'pe'
+        exact_id = oc_response['data']['oc'][strike_key][opt_key]['security_id']
+        return str(exact_id), target_strike
+    except KeyError:
+        st.error(f"Could not find ID for {index_name} {target_strike} {option_type} in the live Option Chain.")
+        return None, target_strike
 
 # ==========================================
-# 4. USER INTERFACE
+# 3. USER INTERFACE
 # ==========================================
 
 st.title("1-Click Options Trader")
 
-# Top Settings
 col_a, col_b = st.columns(2)
 
 with col_a:
     index_choice = st.selectbox("Choose Index", ["Nifty 50", "Sensex"])
 
 with col_b:
-    num_lots = st.selectbox("Select Number of Lots", [1, 2, 3, 4, 5, 10, 20])
+    num_lots = st.selectbox("Select Number of Lots", [1, 2, 3, 4, 5])
 
-# Calculate exact quantity
+# Safety Check: Standard base lot sizes
 base_lot_size = 25 if index_choice == "Nifty 50" else 10
 order_quantity = base_lot_size * num_lots
 
-st.caption(f"**Total trading quantity:** {order_quantity} shares")
+st.caption(f"**Safe Trading Active:** You selected {num_lots} lot(s). Total order quantity will be {order_quantity} shares.")
 st.divider()
 
-# Trade Buttons
 col1, col2 = st.columns(2)
 
 with col1:
     if st.button("BUY (Bull Put Spread)", type="primary"):
-        current_price = get_current_price(index_choice)
+        # Put offsets: ATM is 0, OTM Put is a lower strike
+        otm_offset = -200 if index_choice == "Nifty 50" else -400
         
-        # Calculate Strikes
-        atm_strike = round(current_price / 50) * 50 
-        otm_strike = atm_strike - 200
-        
-        # Get exact IDs
-        otm_id = get_security_id(index_choice, otm_strike, "PE")
-        atm_id = get_security_id(index_choice, atm_strike, "PE")
+        # Fetch directly from Dhan API
+        otm_id, otm_strike = get_live_option_data(index_choice, otm_offset, "PE")
+        atm_id, atm_strike = get_live_option_data(index_choice, 0, "PE")
         
         if otm_id and atm_id:
-            # 1. Buy OTM PE First (For margin benefit)
-            place_market_order(otm_id, dhan.BUY, order_quantity)
+            exchange = dhan.NSE_FNO if index_choice == "Nifty 50" else dhan.BSE_FNO
+            
+            # 1. Buy OTM PE First
+            dhan.place_order(security_id=otm_id, exchange_segment=exchange, transaction_type=dhan.BUY, quantity=order_quantity, order_type=dhan.MARKET, product_type=dhan.MARGIN, price=0)
             st.success(f"Bought {order_quantity}x {otm_strike} PE")
             
             # 2. Sell ATM PE Second
-            place_market_order(atm_id, dhan.SELL, order_quantity)
+            dhan.place_order(security_id=atm_id, exchange_segment=exchange, transaction_type=dhan.SELL, quantity=order_quantity, order_type=dhan.MARKET, product_type=dhan.MARGIN, price=0)
             st.success(f"Sold {order_quantity}x {atm_strike} PE")
             
-            # Save trade details to memory for exiting later
+            # Save state
             st.session_state['active_trade'] = "BUY"
             st.session_state['atm_id'] = atm_id
             st.session_state['otm_id'] = otm_id
             st.session_state['trade_qty'] = order_quantity
+            st.session_state['exchange'] = exchange
 
 with col2:
     if st.button("SELL (Bear Call Spread)", type="primary"):
-        current_price = get_current_price(index_choice)
+        # Call offsets: ATM is 0, OTM Call is a higher strike
+        otm_offset = 200 if index_choice == "Nifty 50" else 400
         
-        # Calculate Strikes
-        atm_strike = round(current_price / 50) * 50
-        otm_strike = atm_strike + 200
-        
-        # Get exact IDs
-        otm_id = get_security_id(index_choice, otm_strike, "CE")
-        atm_id = get_security_id(index_choice, atm_strike, "CE")
+        otm_id, otm_strike = get_live_option_data(index_choice, otm_offset, "CE")
+        atm_id, atm_strike = get_live_option_data(index_choice, 0, "CE")
         
         if otm_id and atm_id:
+            exchange = dhan.NSE_FNO if index_choice == "Nifty 50" else dhan.BSE_FNO
+            
             # 1. Buy OTM CE First
-            place_market_order(otm_id, dhan.BUY, order_quantity)
+            dhan.place_order(security_id=otm_id, exchange_segment=exchange, transaction_type=dhan.BUY, quantity=order_quantity, order_type=dhan.MARKET, product_type=dhan.MARGIN, price=0)
             st.success(f"Bought {order_quantity}x {otm_strike} CE")
             
             # 2. Sell ATM CE Second
-            place_market_order(atm_id, dhan.SELL, order_quantity)
+            dhan.place_order(security_id=atm_id, exchange_segment=exchange, transaction_type=dhan.SELL, quantity=order_quantity, order_type=dhan.MARKET, product_type=dhan.MARGIN, price=0)
             st.success(f"Sold {order_quantity}x {atm_strike} CE")
             
-            # Save trade details to memory
+            # Save state
             st.session_state['active_trade'] = "SELL"
             st.session_state['atm_id'] = atm_id
             st.session_state['otm_id'] = otm_id
             st.session_state['trade_qty'] = order_quantity
+            st.session_state['exchange'] = exchange
 
 st.divider()
 
 # ==========================================
-# 5. MTM AND EXIT SYSTEM
+# 4. MTM AND EXIT SYSTEM
 # ==========================================
 
 st.subheader("Live Positions")
 
-# Show Running Profit/Loss
 try:
     positions = dhan.get_positions()
     if 'data' in positions and positions['data']:
@@ -174,19 +154,19 @@ try:
 except Exception as e:
     st.write("Waiting for active trades to display MTM...")
 
-# Exit Button
 if st.button("EXIT TRADE", type="secondary"):
     if 'active_trade' in st.session_state:
         atm_id = st.session_state['atm_id']
         otm_id = st.session_state['otm_id']
         exit_qty = st.session_state['trade_qty'] 
+        exchange = st.session_state['exchange']
         
         # 1. Close the SELL leg first (buy it back)
-        place_market_order(atm_id, dhan.BUY, exit_qty)
+        dhan.place_order(security_id=atm_id, exchange_segment=exchange, transaction_type=dhan.BUY, quantity=exit_qty, order_type=dhan.MARKET, product_type=dhan.MARGIN, price=0)
         st.warning(f"Closed Sold Leg ({exit_qty} qty).")
         
         # 2. Close the BUY leg second (sell it)
-        place_market_order(otm_id, dhan.SELL, exit_qty)
+        dhan.place_order(security_id=otm_id, exchange_segment=exchange, transaction_type=dhan.SELL, quantity=exit_qty, order_type=dhan.MARKET, product_type=dhan.MARGIN, price=0)
         st.warning(f"Closed Bought Leg ({exit_qty} qty). Trade Exited.")
         
         # Clear the memory
@@ -194,5 +174,6 @@ if st.button("EXIT TRADE", type="secondary"):
         del st.session_state['atm_id']
         del st.session_state['otm_id']
         del st.session_state['trade_qty']
+        del st.session_state['exchange']
     else:
         st.info("No active trades recorded in this window.")
